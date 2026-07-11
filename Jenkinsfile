@@ -2,13 +2,7 @@ pipeline {
     agent any
 
     environment {
-        // Image name is tagged per branch so builds don't clash
         APP_NAME     = "myapp"
-        IMAGE_TAG    = "${APP_NAME}:${env.BRANCH_NAME}-${env.BUILD_NUMBER}"
-        LATEST_TAG   = "${APP_NAME}:${env.BRANCH_NAME}-latest"
-        CONTAINER    = "${APP_NAME}-${env.BRANCH_NAME}"
-        // Only main/master gets deployed to the "real" port; other branches get a different port
-        HOST_PORT    = "${env.BRANCH_NAME == 'main' ? '8501' : '8601'}"
     }
 
     options {
@@ -21,6 +15,21 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
+                script {
+                    // BRANCH_NAME is only auto-set in true Multibranch Pipeline jobs.
+                    // Fall back to GIT_BRANCH (set by a plain checkout) so this also
+                    // works correctly when run as a standalone Pipeline job.
+                    def resolvedBranch = env.BRANCH_NAME ?: env.GIT_BRANCH
+                    resolvedBranch = resolvedBranch ? resolvedBranch.replaceFirst('^origin/', '') : 'unknown'
+
+                    env.RESOLVED_BRANCH = resolvedBranch
+                    env.IMAGE_TAG   = "${APP_NAME}:${resolvedBranch}-${env.BUILD_NUMBER}"
+                    env.LATEST_TAG  = "${APP_NAME}:${resolvedBranch}-latest"
+                    env.CONTAINER   = "${APP_NAME}-${resolvedBranch}"
+                    env.HOST_PORT   = (resolvedBranch == 'main' || resolvedBranch == 'master') ? '8501' : '8601'
+
+                    echo "Resolved branch: ${resolvedBranch}, will deploy to port ${env.HOST_PORT}"
+                }
             }
         }
 
@@ -43,10 +52,8 @@ pipeline {
 
         stage('Deploy') {
             when {
-                anyOf {
-                    branch 'main'
-                    branch 'master'
-                    branch 'develop'
+                expression {
+                    return env.RESOLVED_BRANCH in ['main', 'master', 'develop']
                 }
             }
             steps {
@@ -76,10 +83,10 @@ pipeline {
 
     post {
         success {
-            echo "Build & deploy succeeded for branch ${env.BRANCH_NAME} -> port ${HOST_PORT}"
+            echo "Build & deploy succeeded for branch ${env.RESOLVED_BRANCH} -> port ${env.HOST_PORT}"
         }
         failure {
-            echo "Build failed for branch ${env.BRANCH_NAME}. Check console log."
+            echo "Build failed for branch ${env.RESOLVED_BRANCH}. Check console log."
         }
         always {
             sh 'docker ps --filter "name=${APP_NAME}"'
