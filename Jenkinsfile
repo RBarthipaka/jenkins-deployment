@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        APP_NAME     = "myapp"
+        APP_NAME = "myapp"
     }
 
     options {
@@ -29,6 +29,24 @@ pipeline {
                     env.HOST_PORT   = (resolvedBranch == 'main' || resolvedBranch == 'master') ? '8501' : '8601'
 
                     echo "Resolved branch: ${resolvedBranch}, will deploy to port ${env.HOST_PORT}"
+                }
+            }
+        }
+
+        stage('Check Commit Message') {
+            steps {
+                script {
+                    def commitMessage = sh(
+                        script: "git log -1 --pretty=%B",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Commit Message: ${commitMessage}"
+
+                    if (!commitMessage.toLowerCase().contains("deploy")) {
+                        currentBuild.result = 'NOT_BUILT'
+                        error("Skipping pipeline. Commit message does not contain 'deploy'.")
+                    }
                 }
             }
         }
@@ -63,10 +81,10 @@ pipeline {
                     docker rm ${CONTAINER} || true
 
                     # Run new container
-                    docker run -d \\
-                        --name ${CONTAINER} \\
-                        --restart unless-stopped \\
-                        -p ${HOST_PORT}:8501 \\
+                    docker run -d \
+                        --name ${CONTAINER} \
+                        --restart unless-stopped \
+                        -p ${HOST_PORT}:8501 \
                         ${LATEST_TAG}
                 """
             }
